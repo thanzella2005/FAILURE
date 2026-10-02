@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Supply Chain Analyst App</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a19;--mut:#6b6a66;--card:#f4f3ef;--line:#e1e0d9;--ac:#2a78d6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1a1a19;--fg:#f0efec;--mut:#a6a59d;--card:#262624;--line:#383835;--ac:#5aa0f0}}
+:root[data-theme="dark"]{--bg:#1a1a19;--fg:#f0efec;--mut:#a6a59d;--card:#262624;--line:#383835;--ac:#5aa0f0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:900px;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+h1{font-size:20px;margin:0 0 4px;font-weight:600}h2{font-size:16px;margin:22px 0 8px;font-weight:600}
+p.s{margin:0 0 12px;color:var(--mut);font-size:13px}
+.card{background:var(--card);border-radius:10px;padding:12px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media(min-width:640px){.grid.k{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.l{font-size:12px;color:var(--mut)}.n{font-size:20px;font-weight:600}
+label{font-size:13px;color:var(--mut);display:block;margin-bottom:2px}
+input,select,button{font:inherit;font-size:14px;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}
+input[type=range]{padding:0;border:0}
+button{cursor:pointer;width:auto}button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}
+th{color:var(--mut);font-weight:500;text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}
+td{text-align:right;padding:6px 4px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}
+.c{display:inline-block;min-width:20px;text-align:center;border-radius:4px;font-size:11px;font-weight:600;padding:1px 5px}
+.A{background:#2a78d6;color:#fff}.B{background:#eda100;color:#1a1a19}.C{background:var(--line);color:var(--fg)}
+.err{color:#d03b3b;font-size:13px;margin-top:6px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+</style></head><body>
+<h1>Supply Chain Analyst App</h1>
+<p class="s">Upload a sales CSV with columns: date, sku, units, unit_cost</p>
+<div class="row"><input type="file" id="f" accept=".csv" style="flex:1;min-width:200px"><button class="p" id="demo">Load sample data</button></div>
+<p class="s" style="margin-top:10px">Can't upload a file? Paste your data here instead (first line must be the header):</p>
+<textarea id="pt" rows="5" placeholder="date,sku,units,unit_cost&#10;2025-01-01,SKU001,12,250&#10;2025-01-02,SKU001,9,250" style="width:100%;font:13px monospace;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea>
+<div class="row" style="margin-top:8px"><button class="p" id="pb">Analyze pasted data</button></div>
+<div class="err" id="err"></div>
+
+<h2>Settings</h2>
+<div class="grid">
+<div><label>Service level: <b id="slv">95%</b></label><input type="range" id="sl" min="80" max="99" value="95"></div>
+<div><label>Lead time (days)</label><input type="number" id="lt" value="7" min="1"></div>
+<div><label>Lead time std dev (days)</label><input type="number" id="ls" value="1.5" min="0" step="0.5"></div>
+<div><label>Ordering cost per order</label><input type="number" id="oc" value="500" min="1"></div>
+<div><label>Holding cost (% of unit cost)</label><input type="number" id="hc" value="20" min="1"></div>
+<div><label>Forecast method</label><select id="fm"><option value="ma">Moving average (3)</option><option value="ses">Exp. smoothing (0.3)</option></select></div>
+</div>
+
+<div id="out" style="display:none">
+<h2>Summary</h2><div class="grid k" id="kpi"></div>
+<h2>SKU analysis</h2>
+<div class="wrap"><table><thead><tr><th>SKU</th><th>Class</th><th>Value</th><th>EOQ</th><th>Safety</th><th>ROP</th><th>MAPE</th></tr></thead><tbody id="tb"></tbody></table></div>
+<h2>Demand forecast</h2>
+<select id="sku"></select>
+<p class="s" id="mp" style="margin-top:8px"></p>
+<div style="position:relative;height:240px"><canvas id="ch" role="img" aria-label="Monthly actual demand versus forecast for the selected SKU">Monthly actual versus forecast demand.</canvas></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+var $=function(i){return document.getElementById(i)},ROWS=null,RES=[],MONTHS=[],chart=null;
+function mb(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function sample(){var R=mb(42),o=[];function nr(){return Math.sqrt(-2*Math.log(1-R()))*Math.cos(2*Math.PI*R())}
+for(var i=1;i<=30;i++){var b=5+R()*115,c=Math.round((50+R()*1950)*100)/100;
+for(var k=0;k<365;k++){var d=new Date(Date.UTC(2025,0,1+k)).toISOString().slice(0,10),u=Math.max(0,Math.round(b*(1+0.2*Math.sin(k/365*4*Math.PI))+b*0.25*nr()));o.push({date:d,sku:'SKU'+String(i).padStart(3,'0'),units:u,cost:c})}}return o}
+function parse(t){var L=t.replace(/\r/g,'').split('\n').filter(function(x){return x.trim()});if(L.length<3)throw 'File has too few rows.';
+var h=L[0].split(',').map(function(x){return x.trim().toLowerCase()}),ix={};['date','sku','units','unit_cost'].forEach(function(n){ix[n]=h.indexOf(n);if(ix[n]<0)throw 'Missing column: '+n});
+var o=[];for(var i=1;i<L.length;i++){var p=L[i].split(','),u=parseFloat(p[ix.units]),c=parseFloat(p[ix.unit_cost]),d=(p[ix.date]||'').trim();if(isNaN(u)||isNaN(c)||d.length<7)continue;o.push({date:d,sku:p[ix.sku].trim(),units:u,cost:c})}
+if(o.length<3)throw 'No valid rows found. Use date as YYYY-MM-DD.';return o}
+function cdf(z){var t=1/(1+0.3275911*Math.abs(z/Math.SQRT2)),y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-z*z/2);return z>=0?0.5*(1+y):0.5*(1-y)}
+function zf(p){var lo=-5,hi=5;for(var i=0;i<60;i++){var m=(lo+hi)/2;if(cdf(m)<p)lo=m;else hi=m}return(lo+hi)/2}
+function fc(m,me){var n=m.length,f=new Array(n).fill(null);if(me==='ma'){for(var t=3;t<n;t++)f[t]=(m[t-1]+m[t-2]+m[t-3])/3}else if(n>1){f[1]=m[0];for(var t=2;t<n;t++)f[t]=0.3*m[t-1]+0.7*f[t-1]}return f}
+function mape(a,f){var s=0,n=0;for(var i=0;i<a.length;i++){if(f[i]!==null&&a[i]!==0){s+=Math.abs((a[i]-f[i])/a[i]);n++}}return n?s/n*100:null}
+function fm(n){return Math.round(n).toLocaleString()}
+function analyze(){var g={},ms={};
+ROWS.forEach(function(r){var s=g[r.sku]||(g[r.sku]={id:r.sku,cost:r.cost,u:[],mo:{}});s.u.push(r.units);var k=r.date.slice(0,7);s.mo[k]=(s.mo[k]||0)+r.units;ms[k]=1});
+MONTHS=Object.keys(ms).sort();
+var A=Object.keys(g).map(function(k){var s=g[k];s.tot=s.u.reduce(function(a,b){return a+b},0);s.val=s.tot*s.cost;s.mean=s.tot/s.u.length;
+s.sd=s.u.length>1?Math.sqrt(s.u.reduce(function(a,x){return a+(x-s.mean)*(x-s.mean)},0)/(s.u.length-1)):0;
+s.m=MONTHS.map(function(k2){return s.mo[k2]||0});return s}).sort(function(a,b){return b.val-a.val});
+var T=A.reduce(function(a,x){return a+x.val},0),cum=0;A.forEach(function(x){var p=cum/T;x.cls=p<0.8?'A':p<0.95?'B':'C';cum+=x.val});RES=A;return T}
+function render(){if(!ROWS)return;var T=analyze(),sl=+$('sl').value/100,lt=+$('lt').value,ls=+$('ls').value,oc=+$('oc').value,hc=+$('hc').value/100,me=$('fm').value,z=zf(sl);
+$('slv').textContent=Math.round(sl*100)+'%';var cn={A:0,B:0,C:0},ma=[];
+RES.forEach(function(x){cn[x.cls]++;x.eoq=x.mean>0?Math.sqrt(2*x.mean*365*oc/(x.cost*hc)):0;x.ss=z*Math.sqrt(lt*x.sd*x.sd+x.mean*x.mean*ls*ls);x.rop=x.mean*lt+x.ss;x.f=fc(x.m,me);x.mp=mape(x.m,x.f);if(x.mp!==null)ma.push(x.mp)});
+var avg=ma.length?ma.reduce(function(a,b){return a+b},0)/ma.length:null;
+$('kpi').innerHTML=[['SKUs',RES.length],['Total value',fm(T)],['A / B / C',cn.A+' / '+cn.B+' / '+cn.C],['Avg MAPE',avg===null?'n/a':avg.toFixed(1)+'%']].map(function(k){return '<div class="card"><div class="l">'+k[0]+'</div><div class="n">'+k[1]+'</div></div>'}).join('');
+$('tb').innerHTML=RES.map(function(x){return '<tr><td>'+x.id+'</td><td><span class="c '+x.cls+'">'+x.cls+'</span></td><td>'+fm(x.val)+'</td><td>'+fm(x.eoq)+'</td><td>'+fm(x.ss)+'</td><td>'+fm(x.rop)+'</td><td>'+(x.mp===null?'-':x.mp.toFixed(1)+'%')+'</td></tr>'}).join('');
+var cur=$('sku').value;$('sku').innerHTML=RES.map(function(x){return '<option value="'+x.id+'">'+x.id+' (class '+x.cls+')</option>'}).join('');if(cur)$('sku').value=cur;if(!$('sku').value)$('sku').selectedIndex=0;
+draw();$('out').style.display='block'}
+function draw(){var x=RES.find(function(r){return r.id===$('sku').value});if(!x)return;
+$('mp').textContent=x.id+': MAPE '+(x.mp===null?'n/a (need more months)':x.mp.toFixed(1)+'%')+', avg daily demand '+x.mean.toFixed(1)+'. Solid line = actual, dashed = forecast.';
+var d={labels:MONTHS,datasets:[{label:'Actual',data:x.m,borderColor:'#2a78d6',backgroundColor:'#2a78d6',borderWidth:2,pointRadius:3},{label:'Forecast',data:x.f.map(function(v){return v===null?null:Math.round(v)}),borderColor:'#eb6834',backgroundColor:'#eb6834',borderWidth:2,borderDash:[6,4],pointStyle:'rect',pointRadius:3}]};
+if(chart){chart.data=d;chart.update();return}
+chart=new Chart($('ch'),{type:'line',data:d,options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{boxWidth:10,color:'#898781'}}},scales:{x:{ticks:{color:'#898781',font:{size:11}},grid:{display:false}},y:{beginAtZero:true,ticks:{color:'#898781',font:{size:11}},grid:{color:'rgba(128,128,128,0.2)'}}}}})}
+function go(rows){$('err').textContent='';ROWS=rows;$('sku').innerHTML='';render()}
+$('demo').onclick=function(){go(sample())};
+$('pb').onclick=function(){try{go(parse($('pt').value))}catch(x){$('err').textContent=String(x)}};
+$('f').onchange=function(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(){try{go(parse(r.result))}catch(x){$('err').textContent=String(x)}};r.readAsText(f)};
+['sl','lt','ls','oc','hc','fm'].forEach(function(i){$(i).addEventListener('input',render)});$('sku').addEventListener('input',draw);
+</script></body></html>
